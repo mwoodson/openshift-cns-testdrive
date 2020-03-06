@@ -1,0 +1,271 @@
+== Network Polices and the Default Project Template
+In this lab you will explore network policies, what they are, and how they can be applied to the default project template.
+
+Network policies can be used to deny or allow traffic into and out of Pods that run within Openshift. By default, all Pods in a project are accessible from other Pods and network endpoints. To isolate one or more Pods in a project, you can create NetworkPolicy objects in that project to indicate the allowed incoming connections. Project administrators can create and delete NetworkPolicy objects within their own project.
+
+To make these NetworkPolicy objects default, they can be placed in the default project template so that when new projects are created, they will have the network policies in place by default.
+
+[WARNING]
+====
+This lab requires that you have completed the Project Template labi. The  network policies will be added to the default project template that was created previously.
+====
+
+=== Creating Test Pods
+
+Let's start by creating two projects `network-policy-project1` and `network-policy-project2`.  We will use these projects to explore how to create Network Policies and to demonstrate how they function.
+
+[source,bash]
+----
+oc new-project network-policy-project1
+oc new-project network-policy-project2
+----
+
+You'll be creating two applications. One in the `network-policy-project1` project and the other in the `network-policy-project2` project.
+
+[source,bash]
+----
+oc new-app -n network-policy-project1 --name=php1 quay.io/redhatworkshops/welcome-php:latest
+oc new-app -n network-policy-project2 --name=php2 quay.io/redhatworkshops/welcome-php:latest
+----
+
+After the deployment, you should have two running pods. One in each namespace. Check it with the `oc get pods` command (You may have to run this a few times before you see any output):
+
+[source,bash]
+----
+oc get pods -n network-policy-project1 -l app=php1
+oc get pods -n network-policy-project2 -l app=php2
+----
+
+The output should look something like this:
+
+----
+[~] $ oc get pods -n network-policy-1 -l app=php1
+NAME           READY   STATUS    RESTARTS   AGE
+php1-1-tsmc6   1/1     Running   0          2m43s
+[~] $ oc get pods -n network-policy-2 -l app=php2
+NAME           READY   STATUS    RESTARTS   AGE
+php2-1-s5756   1/1     Running   0          2m15s
+----
+
+=== Creating and Testing Network Policies
+
+For the next part, we need to have two terminals.
+
+Terminal 1: Launch debug console to test the Network Policies from within Openshift
+Terminal 2: oc commands to implement the Network Policies.
+
+Please ensure you have 2 terminals available for this section.
+
+
+==== Debug Pod
+
+When building containers to run inside of Openshift, it's common to install as few packages and tools as possible inside of the container.  This is great practice as it helps save space, builds faster, helps with download times, and is less vulnerable to security issues.  However, it's not useful for the times when debugging tools are needed and they are not present on the container.
+
+For this section we need to use networking debugging utilities in order to test and verify network connectivity.  We will be using the `rhel7/rhel-tools` container that is provided by Red Hat to help us debug.  This is a container that has been built by Red Hat that includes debugging tools.
+
+Let's launch the `rhel-tools` container inside of the `network-policy-project2` project.
+
+.Terminal 1
+----
+[~] $ oc -n network-policy-project2 debug dc/php2 --image registry.redhat.io/rhel7/rhel-tools
+Starting pod/php2-debug, command was: container-entrypoint /usr/libexec/s2i/run
+sh-4.2#
+----
+
+This command downloaded the `rhel7/rhel-tools` container into the `network-policy-project2` and start it with `/bin/sh` as the entry point.  We now have a shell prompt inside the project with all the networking configurations already applied.  We will be running network testing commands from here to test and verify the configuration
+
+
+[NOTE]
+====
+By default oc debug will create an existing container without any monitoring enabled.  By adding the `--image`, we are overriding it with an image we have selected.
+
+Much more can be done with the `oc debug` command. Please see documentaion for more on `oc debug`.
+====
+
+
+notes and stuff:
+
+ oc debug dc/php1 --image registry.redhat.io/rhel7/rhel-tools
+ oc new-app -n np-test2 --name=php1 quay.io/redhatworkshops/welcome-php:latest
+oc get services -n np-test1, np-test2
+nc -zv 172.30.117.128 8080
+https://docs.openshift.com/container-platform/4.3/networking/configuring-networkpolicy.html
+
+
+==== Testing connectivity
+
+Now let's get the services that are running in the `network-policy-project1` project:
+
+.Terminal 2
+----
+[~] $ oc get services -n network-policy-project1
+NAME   TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)             AGE
+php1   ClusterIP   172.30.42.64   <none>        8080/TCP,8443/TCP   55s
+----
+
+We can see that there is a `service` running on the IP of `172.30.42.64` and listening on both ports `8080` and `8443`.  (The IP will be different in your project, but the ports will be the same)
+
+As stated earlier, by default, all Pods in a project are accessible from other Pods and network endpoints.  Let's verify this.
+
+In Terminal 1, which is originatin from `network-policy-project2`, we can verify connectivity:
+
+.Terminal 1
+----
+sh-4.2# nc -zv 172.30.42.64 8080
+Ncat: Version 7.50 ( https://nmap.org/ncat )
+Ncat: Connected to 172.30.42.64:8080.
+Ncat: 0 bytes sent, 0 bytes received in 0.01 seconds.
+----
+
+We can see that port `8080` responded and is therefore open.
+
+[NOTE]
+====
+`nc`, or `netcat`, is a powerful network toolbox that can be used to test network connectivy.  It is included as a tool in the `rhel-tools` container.
+====
+
+
+==== First Network Policy
+
+Let's now create a simple deny all Network Policy in the `network-policy-project1` project. This will deny all connectivity from all 
+
+Here is the simple "deny-all" policy
+
+[source,yaml]
+.network_policy_deny_all.yaml
+----
+kind: NetworkPolicy
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: my-network-policy
+spec:
+  podSelector:
+  ingress: []
+----
+
+To create the `NetworkPolicy`, run the following command:
+
+[source,bash,role="execute"]
+.Terminal 2
+----
+oc create -n network-policy-project1 -f {{ HOME_PATH }}/support/network_policy_deny_all.yaml
+
+# Verify that the NetworkPolicy is in place
+[~] $ oc get -n network-policy-project1 networkpolicy
+NAME                POD-SELECTOR   AGE
+my-network-policy   <none>         90s
+----
+
+Because this is a deny-all policy, no traffic should be able the pods in `network-policy-project1`.  Let's test this from the `network-policy-project2` debug pod
+
+
+.Terminal 1
+----
+sh-4.2# nc -zv 172.30.42.64 8080
+Ncat: Version 7.50 ( https://nmap.org/ncat )
+Ncat: Connection timed out.
+----
+
+We observe here that the `Connection timed out.`  This means the NetworkPolicy is in place, and doing it's job!
+
+==== Allowing Other Namespaces
+
+In the current state, the project `network-policy-project1` can't communicate with anything.  It's pretty well locked down.  Let's make some adjustments to the NetworkPolicy to allow more traffic to connect.
+
+One way that we can specify traffic in the `NetworkPolicy` is to match `namespaces` that contain certain `labels`. Let's see an example to help illustrate this.
+
+
+[source,yaml]
+.network_policy_deny_all.yaml
+----
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: my-network-policy
+spec:
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          network.openshift.io/policy-group: network-policy-project
+  podSelector: {}
+  policyTypes:
+  - Ingress
+----
+
+This policy now states, if a `namespace` has this `label` applied:
+
+`network.openshift.io/policy-group: network-policy-project`
+
+Traffic will be allowed in.
+
+To replace the `NetworkPolicy` that is currently in place, run the following command:
+
+[source,bash,role="execute"]
+.Terminal 2
+----
+[~] $ oc replace -n network-policy-project1 -f {{ HOME_PATH }}/support/network_policy_allow_from_project.yaml
+
+# Verify that the NetworkPolicy is in place
+[~] $ oc get -n network-policy-project1 networkpolicy
+NAME                POD-SELECTOR   AGE
+my-network-policy   <none>         26m
+----
+
+At this point, `network-policy-project1` is open to all namespaces that have the label `network.openshift.io/policy-group: network-policy-project`, but we currently do not have any namespaces with this label.  Let's go ahead and label `network-project-policy2`
+
+[source,bash,role="execute"]
+.Terminal 2
+----
+[~] $ oc label namespace network-policy-project2 'network.openshift.io/policy-group=network-policy-project'
+----
+
+And to verify connectivity:
+
+
+.Terminal 1
+----
+sh-4.2# nc -zv 172.30.42.64 8080
+Ncat: Version 7.50 ( https://nmap.org/ncat )
+Ncat: Connected to 172.30.42.64:8080.
+Ncat: 0 bytes sent, 0 bytes received in 0.01 seconds.
+----
+
+We can see that port `8080` responded and is open again from that project.
+
+
+=== Integrating with the Default Project Template
+
+We have learned how to create simple Network Policies and how they work from with in the cluster.  Now let's look at a more useful scenario and how we can make it default for all new projects in the cluster.
+
+For this scenario, it's been mandated by company policy that by default, no pods can interact with any other pods in the cluster, but will need to be able to route out of the cluster.  We could create a `NetworkPolicy` that looks like this:
+
+
+[source,yaml]
+----
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: my-network-policy
+spec:
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:          
+          network.openshift.io/policy-group: ingress
+  podSelector: {}
+  policyTypes:
+  - Ingress
+----
+
+Notice that this `NetworkPolicy` looks very similar to the previous one we created.  The difference here is that we have a new `matchLabel`.  This label gets applied to the `openshift-ingress` namespace when the cluster is created.  This can be verified:
+
+[source,bash,role="execute"]
+.Terminal 2
+----
+[~] $ oc get namespace openshift-ingress -o jsonpath='{.metadata.labels}'
+----
+
+To make this default, we can add this `NetworkPolicy` to the Default Project Template we created in an earlier lab.
+
+
